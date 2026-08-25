@@ -98,8 +98,6 @@ private fun ParleroRoot() {
             when (val screen = currentScreen) {
                 Screen.Leitura -> CameraScreen(voice = selectedVoice, rate = rateString)
                 Screen.Documento -> DocumentScreen(
-                    voice = selectedVoice,
-                    rate = rateString,
                     onTextRecognized = { text -> currentScreen = Screen.Reader(text) }
                 )
                 is Screen.Reader -> ReaderScreen(

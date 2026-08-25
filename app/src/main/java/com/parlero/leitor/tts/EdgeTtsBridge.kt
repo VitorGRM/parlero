@@ -100,17 +100,6 @@ class EdgeTtsBridge(private val context: Context) {
         activePlayer?.let { if (!it.isPlaying) it.start() }
     }
 
-    /** Lista vozes Edge TTS, por padrão filtradas para português e inglês. */
-    suspend fun listVoices(
-        localePrefixes: List<String> = listOf("pt-BR", "pt-PT", "en-US")
-    ): List<EdgeVoice> = withContext(Dispatchers.IO) {
-        val result = bridgeModule.callAttr("list_voices", localePrefixes.toTypedArray())
-        result.asList().mapNotNull { item ->
-            val parts = item.toString().split("|")
-            if (parts.size == 3) EdgeVoice(parts[0], parts[1], parts[2]) else null
-        }
-    }
-
     private fun cacheKeyRaw(text: String, voice: String, rate: String, pitch: String) =
         "$voice|$rate|$pitch|$text"
 

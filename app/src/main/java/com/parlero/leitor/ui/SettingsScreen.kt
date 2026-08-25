@@ -16,11 +16,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,8 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.parlero.leitor.BuildConfig
-import com.parlero.leitor.tts.EdgeTtsBridge
-import com.parlero.leitor.tts.EdgeVoice
+import com.parlero.leitor.tts.VoiceCatalog
 import com.parlero.leitor.update.UpdateChecker
 import com.parlero.leitor.update.UpdateInfo
 import kotlinx.coroutines.launch
@@ -54,21 +53,16 @@ fun SettingsScreen(
     onRateChanged: (Int) -> Unit,
 ) {
     val context = LocalContext.current
-    val ttsBridge = remember { EdgeTtsBridge(context) }
     val updateChecker = remember { UpdateChecker(context) }
     val scope = rememberCoroutineScope()
 
-    var voices by remember { mutableStateOf<List<EdgeVoice>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        try {
-            voices = ttsBridge.listVoices()
-        } catch (e: Exception) {
-            error = "Não foi possível carregar as vozes. Verifique sua conexão com a internet."
-        } finally {
-            loading = false
+    val allVoices = remember { VoiceCatalog.loadAll(context) }
+    var voiceQuery by remember { mutableStateOf("") }
+    val filteredVoices = remember(allVoices, voiceQuery) {
+        if (voiceQuery.isBlank()) allVoices
+        else allVoices.filter {
+            it.locale.contains(voiceQuery, ignoreCase = true) ||
+                it.shortName.contains(voiceQuery, ignoreCase = true)
         }
     }
 
@@ -113,15 +107,21 @@ fun SettingsScreen(
         )
 
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Voz", style = MaterialTheme.typography.bodyLarge)
+        Text("Voz (${allVoices.size} disponíveis, todos os idiomas)", style = MaterialTheme.typography.bodyLarge)
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = voiceQuery,
+            onValueChange = { voiceQuery = it },
+            label = { Text("Buscar por idioma ou nome (ex.: pt-BR, en-US, Francisca)") },
+            modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
 
-        when {
-            loading -> CircularProgressIndicator()
-            error != null -> Text(error!!)
-            voices.isEmpty() -> Text("Nenhuma voz encontrada.")
-            else -> LazyColumn(modifier = Modifier.weight(1f)) {
-                items(voices) { voice ->
+        if (filteredVoices.isEmpty()) {
+            Text("Nenhuma voz encontrada para \"$voiceQuery\".")
+        } else {
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                items(filteredVoices) { voice ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically

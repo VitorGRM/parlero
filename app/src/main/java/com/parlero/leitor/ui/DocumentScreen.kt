@@ -1,206 +1,144 @@
 package com.parlero.leitor.ui
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.view.MotionEvent
+import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.foundation.background
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
-import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.view.LifecycleCameraController
-import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
- * Modo "Documento": foca e tira a foto tocando na tela (como no Seeing AI) ou pelo botão,
- * roda OCR na página inteira e manda o texto reconhecido para a tela de leitura (ReaderScreen).
+ * Modo "Documento": usa o ML Kit Document Scanner (mesma família de tecnologia por trás de
+ * apps tipo CamScanner) para detectar a página, cortar e corrigir a perspectiva automaticamente
+ * — a UI de captura é toda do próprio Google Play Services, não é mais feita à mão aqui.
+ * O texto reconhecido de cada página é concatenado e mandado para a tela de leitura.
  */
 @Composable
-fun DocumentScreen(voice: String, rate: String, onTextRecognized: (String) -> Unit) {
+fun DocumentScreen(onTextRecognized: (String) -> Unit) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = context as? Activity
     val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
-
-    var hasCameraPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-                == PackageManager.PERMISSION_GRANTED
-        )
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> hasCameraPermission = granted }
-
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
-    }
+    val scope = rememberCoroutineScope()
 
     var isProcessing by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var controllerRef by remember { mutableStateOf<LifecycleCameraController?>(null) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (hasCameraPermission) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    val controller = LifecycleCameraController(ctx)
-                    controller.cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                    controller.imageCaptureMode = ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
-                    controller.bindToLifecycle(lifecycleOwner)
-                    previewView.controller = controller
-                    controllerRef = controller
-
-                    // Toque na tela: foca naquele ponto (como o Seeing AI) e, logo em
-                    // seguida, tira a foto — sem precisar de um botão separado.
-                    previewView.setOnTouchListener { view, event ->
-                        if (event.action == MotionEvent.ACTION_UP && !isProcessing) {
-                            val point = previewView.meteringPointFactory.createPoint(event.x, event.y)
-                            val meteringAction = FocusMeteringAction.Builder(
-                                point,
-                                FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
-                            ).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
-                            controller.cameraControl?.startFocusAndMetering(meteringAction)
-
-                            isProcessing = true
-                            view.postDelayed({
-                                capturePage(
-                                    controller, ctx, recognizer,
-                                    onResult = { text -> isProcessing = false; onTextRecognized(text) },
-                                    onError = { msg -> isProcessing = false; errorMessage = msg }
-                                )
-                            }, 350)
-                        }
-                        view.performClick()
-                        true
-                    }
-
-                    previewView
+    val scannerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+        val pages = scanResult?.pages
+        if (pages.isNullOrEmpty()) {
+            errorMessage = "Nenhuma página capturada."
+            return@rememberLauncherForActivityResult
+        }
+        isProcessing = true
+        errorMessage = null
+        scope.launch {
+            val texts = mutableListOf<String>()
+            for (page in pages) {
+                try {
+                    val inputImage = InputImage.fromFilePath(context, page.imageUri)
+                    val text = recognizeText(recognizer, inputImage)
+                    if (text.isNotBlank()) texts += text
+                } catch (e: Exception) {
+                    // Segue pras outras páginas mesmo se uma falhar.
                 }
-            )
+            }
+            isProcessing = false
+            val fullText = texts.joinToString("\n\n")
+            if (fullText.isBlank()) {
+                errorMessage = "Nenhum texto encontrado nas páginas escaneadas."
+            } else {
+                onTextRecognized(fullText)
+            }
+        }
+    }
+
+    fun startScan() {
+        val act = activity ?: run {
+            errorMessage = "Não foi possível abrir o scanner."
+            return
+        }
+        errorMessage = null
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(10)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+        GmsDocumentScanning.getClient(options)
+            .getStartScanIntent(act)
+            .addOnSuccessListener { intentSender ->
+                scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+            }
+            .addOnFailureListener {
+                errorMessage = "Não foi possível abrir o scanner de documentos."
+            }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        if (isProcessing) {
+            CircularProgressIndicator()
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+            Text("Reconhecendo texto...", style = MaterialTheme.typography.bodyLarge)
         } else {
             Text(
-                "É preciso permitir o uso da câmera para fotografar documentos.",
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                style = MaterialTheme.typography.bodyLarge
+                "Escaneie um documento: a página é detectada, cortada e endireitada automaticamente.",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(bottom = 24.dp)
             )
-        }
-
-        if (isProcessing) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-        }
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "Toque em qualquer ponto da tela para focar e fotografar",
-                color = androidx.compose.ui.graphics.Color.White,
-                style = MaterialTheme.typography.bodySmall
-            )
-            if (errorMessage != null) {
-                Text(errorMessage!!, color = androidx.compose.ui.graphics.Color.Red)
+            Button(onClick = { startScan() }) {
+                Icon(Icons.Filled.DocumentScanner, contentDescription = null)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+                Text("Escanear documento")
             }
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-            Row(horizontalArrangement = Arrangement.Center) {
-                ExtendedFloatingActionButton(
-                    text = { Text("Capturar página") },
-                    icon = { Icon(Icons.Filled.CameraAlt, contentDescription = null) },
-                    onClick = {
-                        // Alternativa acessível ao toque livre na tela (não depende de mirar um ponto exato).
-                        val controller = controllerRef ?: return@ExtendedFloatingActionButton
-                        if (!isProcessing) {
-                            isProcessing = true
-                            capturePage(
-                                controller, context, recognizer,
-                                onResult = { text -> isProcessing = false; onTextRecognized(text) },
-                                onError = { msg -> isProcessing = false; errorMessage = msg }
-                            )
-                        }
-                    }
-                )
+            if (errorMessage != null) {
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+                Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
             }
         }
     }
 }
 
-@OptIn(ExperimentalGetImage::class)
-private fun capturePage(
-    controller: LifecycleCameraController,
-    context: Context,
-    recognizer: TextRecognizer,
-    onResult: (String) -> Unit,
-    onError: (String) -> Unit,
-) {
-    controller.takePicture(
-        ContextCompat.getMainExecutor(context),
-        object : ImageCapture.OnImageCapturedCallback() {
-            override fun onCaptureSuccess(image: ImageProxy) {
-                val mediaImage = image.image
-                if (mediaImage == null) {
-                    image.close()
-                    onError("Não foi possível capturar a imagem.")
-                    return
-                }
-                val inputImage = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
-                recognizer.process(inputImage)
-                    .addOnSuccessListener { visionText ->
-                        if (visionText.text.isBlank()) {
-                            onError("Nenhum texto encontrado nessa foto.")
-                        } else {
-                            onResult(visionText.text)
-                        }
-                    }
-                    .addOnFailureListener { onError("Falha ao reconhecer o texto.") }
-                    .addOnCompleteListener { image.close() }
-            }
-
-            override fun onError(exception: ImageCaptureException) {
-                onError("Falha ao tirar a foto.")
-            }
-        }
-    )
-}
+private suspend fun recognizeText(recognizer: TextRecognizer, image: InputImage): String =
+    suspendCancellableCoroutine { cont ->
+        recognizer.process(image)
+            .addOnSuccessListener { if (cont.isActive) cont.resume(it.text) }
+            .addOnFailureListener { if (cont.isActive) cont.resumeWithException(it) }
+    }

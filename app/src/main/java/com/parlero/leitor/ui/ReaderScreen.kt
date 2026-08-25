@@ -20,12 +20,13 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +48,7 @@ import com.parlero.leitor.reader.ReaderController
 import com.parlero.leitor.reader.segmentSentences
 import com.parlero.leitor.tts.EdgeTtsBridge
 import com.parlero.leitor.tts.EdgeVoice
+import com.parlero.leitor.tts.VoiceCatalog
 import androidx.compose.runtime.DisposableEffect
 
 @Composable
@@ -78,12 +80,7 @@ fun ReaderScreen(
     }
 
     var showSettings by remember { mutableStateOf(false) }
-    var voices by remember { mutableStateOf<List<EdgeVoice>>(emptyList()) }
-    LaunchedEffect(showSettings) {
-        if (showSettings && voices.isEmpty()) {
-            runCatching { ttsBridge.listVoices() }.onSuccess { voices = it }
-        }
-    }
+    val allVoices = remember { VoiceCatalog.loadAll(context) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -104,7 +101,7 @@ fun ReaderScreen(
         }
 
         if (showSettings) {
-            ReaderSettingsPanel(controller = controller, voices = voices)
+            ReaderSettingsPanel(controller = controller, allVoices = allVoices)
             HorizontalDivider()
         }
 
@@ -160,28 +157,39 @@ fun ReaderScreen(
 }
 
 @Composable
-private fun ReaderSettingsPanel(controller: ReaderController, voices: List<EdgeVoice>) {
-    var voiceMenuExpanded by remember { mutableStateOf(false) }
+private fun ReaderSettingsPanel(controller: ReaderController, allVoices: List<EdgeVoice>) {
+    var voiceQuery by remember { mutableStateOf("") }
+    val filteredVoices = remember(allVoices, voiceQuery) {
+        if (voiceQuery.isBlank()) allVoices
+        else allVoices.filter {
+            it.locale.contains(voiceQuery, ignoreCase = true) ||
+                it.shortName.contains(voiceQuery, ignoreCase = true)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("Voz", style = MaterialTheme.typography.bodyMedium)
-        Box {
-            Text(
-                controller.voice,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { voiceMenuExpanded = true }
-                    .padding(vertical = 8.dp)
-            )
-            DropdownMenu(expanded = voiceMenuExpanded, onDismissRequest = { voiceMenuExpanded = false }) {
-                voices.forEach { v ->
-                    DropdownMenuItem(
-                        text = { Text("${v.locale} · ${v.gender} · ${v.shortName}") },
-                        onClick = {
-                            controller.voice = v.shortName
-                            voiceMenuExpanded = false
-                        }
+        Text("Voz atual: ${controller.voice}", style = MaterialTheme.typography.bodyMedium)
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedTextField(
+            value = voiceQuery,
+            onValueChange = { voiceQuery = it },
+            label = { Text("Buscar voz (idioma ou nome)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        LazyColumn(modifier = Modifier.fillMaxWidth().height(160.dp)) {
+            items(filteredVoices) { v ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { controller.voice = v.shortName }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = v.shortName == controller.voice,
+                        onClick = { controller.voice = v.shortName }
                     )
+                    Text("${v.locale} · ${v.gender} · ${v.shortName}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

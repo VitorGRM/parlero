@@ -13,8 +13,8 @@ android {
         applicationId = "com.parlero.leitor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
 
         ndk {
             // Python 3.13 (Chaquopy) só suporta ABIs de 64 bits. arm64-v8a cobre praticamente
@@ -85,6 +85,7 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.4")
 
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 

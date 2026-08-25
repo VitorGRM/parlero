@@ -15,22 +15,3 @@ def synthesize(text: str, voice: str, rate: str, pitch: str, out_path: str) -> N
         await communicate.save(out_path)
 
     asyncio.run(_run())
-
-
-def list_voices(locale_prefixes=None):
-    """Retorna vozes disponíveis como strings "ShortName|Locale|Gender".
-
-    Filtra por prefixo de locale (ex.: "pt-BR") quando informado, para não
-    devolver as ~300+ vozes de todos os idiomas para o Kotlin.
-    """
-
-    async def _run():
-        voices = await edge_tts.list_voices()
-        if locale_prefixes:
-            voices = [
-                v for v in voices
-                if any(v["Locale"].startswith(p) for p in locale_prefixes)
-            ]
-        return [f'{v["ShortName"]}|{v["Locale"]}|{v["Gender"]}' for v in voices]
-
-    return asyncio.run(_run())
