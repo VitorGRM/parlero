@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.parlero.leitor.ai.LocalAiOcr
+import com.parlero.leitor.ai.resolveToFilePath
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
@@ -44,14 +46,18 @@ import kotlin.coroutines.resumeWithException
  * O texto reconhecido de cada página é concatenado e mandado para a tela de leitura.
  */
 @Composable
-fun DocumentScreen(onTextRecognized: (String) -> Unit) {
+fun DocumentScreen(useLocalAi: Boolean, onTextRecognized: (String) -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
     val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    val localAiOcr = remember { LocalAiOcr(context) }
     val scope = rememberCoroutineScope()
 
     var isProcessing by remember { mutableStateOf(false) }
+    var progressText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val useLocalAiNow = useLocalAi && localAiOcr.isModelDownloaded()
 
     val scannerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -67,10 +73,18 @@ fun DocumentScreen(onTextRecognized: (String) -> Unit) {
         errorMessage = null
         scope.launch {
             val texts = mutableListOf<String>()
-            for (page in pages) {
+            pages.forEachIndexed { index, page ->
+                progressText = if (useLocalAiNow) {
+                    "Reconhecendo com IA local: página ${index + 1} de ${pages.size} (pode demorar bastante)..."
+                } else {
+                    "Reconhecendo texto: página ${index + 1} de ${pages.size}..."
+                }
                 try {
-                    val inputImage = InputImage.fromFilePath(context, page.imageUri)
-                    val text = recognizeText(recognizer, inputImage)
+                    val text = if (useLocalAiNow) {
+                        localAiOcr.readTextFromImage(resolveToFilePath(context, page.imageUri))
+                    } else {
+                        recognizeText(recognizer, InputImage.fromFilePath(context, page.imageUri))
+                    }
                     if (text.isNotBlank()) texts += text
                 } catch (e: Exception) {
                     // Segue pras outras páginas mesmo se uma falhar.
@@ -116,13 +130,20 @@ fun DocumentScreen(onTextRecognized: (String) -> Unit) {
         if (isProcessing) {
             CircularProgressIndicator()
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-            Text("Reconhecendo texto...", style = MaterialTheme.typography.bodyLarge)
+            Text(progressText, style = MaterialTheme.typography.bodyLarge)
         } else {
             Text(
                 "Escaneie um documento: a página é detectada, cortada e endireitada automaticamente.",
                 style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.padding(bottom = 24.dp)
+                modifier = Modifier.padding(bottom = 8.dp)
             )
+            if (useLocalAi) {
+                Text(
+                    if (useLocalAiNow) "IA local ativada — o reconhecimento será mais lento." else "IA local ativada, mas o modelo ainda não foi baixado (Configurações). Usando o reconhecimento padrão por enquanto.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+            }
             Button(onClick = { startScan() }) {
                 Icon(Icons.Filled.DocumentScanner, contentDescription = null)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))

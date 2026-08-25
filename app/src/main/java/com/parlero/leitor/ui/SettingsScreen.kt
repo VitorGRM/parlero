@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.parlero.leitor.BuildConfig
+import com.parlero.leitor.ai.LocalAiOcr
 import com.parlero.leitor.tts.VoiceCatalog
 import com.parlero.leitor.update.UpdateChecker
 import com.parlero.leitor.update.UpdateInfo
@@ -45,15 +47,24 @@ private sealed interface UpdateState {
     data class Error(val message: String) : UpdateState
 }
 
+private sealed interface ModelDownloadState {
+    data object Idle : ModelDownloadState
+    data class Downloading(val progress: Int) : ModelDownloadState
+    data class Error(val message: String) : ModelDownloadState
+}
+
 @Composable
 fun SettingsScreen(
     selectedVoice: String,
     speechRatePercent: Int,
     onVoiceSelected: (String) -> Unit,
     onRateChanged: (Int) -> Unit,
+    useLocalAi: Boolean,
+    onUseLocalAiChanged: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val updateChecker = remember { UpdateChecker(context) }
+    val localAiOcr = remember { LocalAiOcr(context) }
     val scope = rememberCoroutineScope()
 
     val allVoices = remember { VoiceCatalog.loadAll(context) }
@@ -136,6 +147,69 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+        var modelDownloaded by remember { mutableStateOf(localAiOcr.isModelDownloaded()) }
+        var modelDownloadState by remember { mutableStateOf<ModelDownloadState>(ModelDownloadState.Idle) }
+
+        Text("IA local para OCR (experimental)", style = MaterialTheme.typography.bodyLarge)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            "Modelo Gemma 4 rodando 100% no aparelho, sem internet nem API depois de baixado. " +
+                "Bem mais lento que o reconhecimento padrão (pode levar 30-90+ segundos por página " +
+                "num aparelho como o seu) — use quando o reconhecimento normal errar muito.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = useLocalAi, onCheckedChange = onUseLocalAiChanged)
+            Spacer(modifier = Modifier.padding(4.dp))
+            Text(if (useLocalAi) "Ativada" else "Desativada")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        when (val dlState = modelDownloadState) {
+            is ModelDownloadState.Idle -> {
+                if (modelDownloaded) {
+                    Text("Modelo baixado (${localAiOcr.modelSizeMb()}MB) ✓")
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(onClick = {
+                        localAiOcr.deleteModel()
+                        modelDownloaded = false
+                    }) { Text("Remover modelo (liberar espaço)") }
+                } else {
+                    Button(onClick = {
+                        modelDownloadState = ModelDownloadState.Downloading(0)
+                        scope.launch {
+                            try {
+                                localAiOcr.downloadModel { progress ->
+                                    modelDownloadState = ModelDownloadState.Downloading(progress)
+                                }
+                                modelDownloaded = true
+                                modelDownloadState = ModelDownloadState.Idle
+                            } catch (e: Exception) {
+                                modelDownloadState =
+                                    ModelDownloadState.Error("Falha ao baixar o modelo. Verifique sua internet.")
+                            }
+                        }
+                    }) { Text("Baixar modelo (~2.4GB, uma vez só)") }
+                }
+            }
+            is ModelDownloadState.Downloading -> Column {
+                Text("Baixando modelo... ${dlState.progress}%")
+                Spacer(modifier = Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { dlState.progress / 100f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            is ModelDownloadState.Error -> Column {
+                Text(dlState.message)
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { modelDownloadState = ModelDownloadState.Idle }) { Text("Tentar de novo") }
             }
         }
 

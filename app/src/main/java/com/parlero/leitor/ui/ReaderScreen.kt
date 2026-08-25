@@ -57,6 +57,8 @@ fun ReaderScreen(
     initialVoice: String,
     initialRatePercent: Int,
     onBack: () -> Unit,
+    onVoiceChanged: (String) -> Unit,
+    onRateChanged: (Int) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -69,6 +71,11 @@ fun ReaderScreen(
     DisposableEffect(controller) {
         onDispose { controller.stop() }
     }
+
+    // Trocar a voz/velocidade aqui também atualiza o padrão do app (Configurações),
+    // não fica só valendo pra essa sessão de leitura.
+    LaunchedEffect(controller.voice) { onVoiceChanged(controller.voice) }
+    LaunchedEffect(controller.ratePercent) { onRateChanged(controller.ratePercent) }
 
     LaunchedEffect(controller) {
         if (sentences.isNotEmpty()) controller.playFrom(0)

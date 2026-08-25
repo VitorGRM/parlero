@@ -33,6 +33,7 @@ import com.parlero.leitor.ui.SettingsScreen
 private const val PREFS_NAME = "parlero_prefs"
 private const val KEY_VOICE = "voice"
 private const val KEY_RATE = "rate"
+private const val KEY_USE_LOCAL_AI = "use_local_ai"
 
 // Voz padrão em português do Brasil; o usuário pode trocar em Configurações.
 private const val DEFAULT_VOICE = "pt-BR-FranciscaNeural"
@@ -64,6 +65,7 @@ private fun ParleroRoot() {
         mutableStateOf(prefs.getString(KEY_VOICE, DEFAULT_VOICE) ?: DEFAULT_VOICE)
     }
     var ratePercent by remember { mutableStateOf(prefs.getInt(KEY_RATE, 0)) }
+    var useLocalAi by remember { mutableStateOf(prefs.getBoolean(KEY_USE_LOCAL_AI, false)) }
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Leitura) }
 
     val rateString = if (ratePercent >= 0) "+${ratePercent}%" else "${ratePercent}%"
@@ -94,28 +96,40 @@ private fun ParleroRoot() {
             }
         }
     ) { padding ->
+        fun persistVoice(voice: String) {
+            selectedVoice = voice
+            prefs.edit().putString(KEY_VOICE, voice).apply()
+        }
+
+        fun persistRate(rate: Int) {
+            ratePercent = rate
+            prefs.edit().putInt(KEY_RATE, rate).apply()
+        }
+
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             when (val screen = currentScreen) {
                 Screen.Leitura -> CameraScreen(voice = selectedVoice, rate = rateString)
                 Screen.Documento -> DocumentScreen(
+                    useLocalAi = useLocalAi,
                     onTextRecognized = { text -> currentScreen = Screen.Reader(text) }
                 )
                 is Screen.Reader -> ReaderScreen(
                     text = screen.text,
                     initialVoice = selectedVoice,
                     initialRatePercent = ratePercent,
-                    onBack = { currentScreen = Screen.Documento }
+                    onBack = { currentScreen = Screen.Documento },
+                    onVoiceChanged = ::persistVoice,
+                    onRateChanged = ::persistRate
                 )
                 Screen.Configuracoes -> SettingsScreen(
                     selectedVoice = selectedVoice,
                     speechRatePercent = ratePercent,
-                    onVoiceSelected = {
-                        selectedVoice = it
-                        prefs.edit().putString(KEY_VOICE, it).apply()
-                    },
-                    onRateChanged = {
-                        ratePercent = it
-                        prefs.edit().putInt(KEY_RATE, it).apply()
+                    onVoiceSelected = ::persistVoice,
+                    onRateChanged = ::persistRate,
+                    useLocalAi = useLocalAi,
+                    onUseLocalAiChanged = {
+                        useLocalAi = it
+                        prefs.edit().putBoolean(KEY_USE_LOCAL_AI, it).apply()
                     }
                 )
             }

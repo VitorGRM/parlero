@@ -13,8 +13,8 @@ android {
         applicationId = "com.parlero.leitor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.3.0"
 
         ndk {
             // Python 3.13 (Chaquopy) só suporta ABIs de 64 bits. arm64-v8a cobre praticamente
@@ -36,9 +36,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 
     buildFeatures {
         compose = true
@@ -54,6 +51,12 @@ android {
                 "META-INF/NOTICE*"
             )
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -86,6 +89,9 @@ dependencies {
 
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+
+    // IA local (Gemma 4 E2B via LiteRT-LM) — OCR/leitura offline sem API, opcional/pesado.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
