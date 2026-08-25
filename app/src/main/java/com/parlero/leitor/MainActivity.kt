@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.parlero.leitor.ui.CameraScreen
 import com.parlero.leitor.ui.DocumentScreen
+import com.parlero.leitor.ui.ReaderScreen
 import com.parlero.leitor.ui.SettingsScreen
 
 private const val PREFS_NAME = "parlero_prefs"
@@ -47,10 +48,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen(val label: String) {
-    LEITURA("Texto Curto"),
-    DOCUMENTO("Documento"),
-    CONFIGURACOES("Configurações"),
+private sealed class Screen {
+    data object Leitura : Screen()
+    data object Documento : Screen()
+    data class Reader(val text: String) : Screen()
+    data object Configuracoes : Screen()
 }
 
 @Composable
@@ -62,39 +64,51 @@ private fun ParleroRoot() {
         mutableStateOf(prefs.getString(KEY_VOICE, DEFAULT_VOICE) ?: DEFAULT_VOICE)
     }
     var ratePercent by remember { mutableStateOf(prefs.getInt(KEY_RATE, 0)) }
-    var currentScreen by remember { mutableStateOf(Screen.LEITURA) }
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Leitura) }
 
     val rateString = if (ratePercent >= 0) "+${ratePercent}%" else "${ratePercent}%"
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = currentScreen == Screen.LEITURA,
-                    onClick = { currentScreen = Screen.LEITURA },
-                    icon = { Icon(Icons.Filled.CameraAlt, contentDescription = null) },
-                    label = { Text(Screen.LEITURA.label) }
-                )
-                NavigationBarItem(
-                    selected = currentScreen == Screen.DOCUMENTO,
-                    onClick = { currentScreen = Screen.DOCUMENTO },
-                    icon = { Icon(Icons.Filled.Description, contentDescription = null) },
-                    label = { Text(Screen.DOCUMENTO.label) }
-                )
-                NavigationBarItem(
-                    selected = currentScreen == Screen.CONFIGURACOES,
-                    onClick = { currentScreen = Screen.CONFIGURACOES },
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                    label = { Text(Screen.CONFIGURACOES.label) }
-                )
+            if (currentScreen !is Screen.Reader) {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentScreen == Screen.Leitura,
+                        onClick = { currentScreen = Screen.Leitura },
+                        icon = { Icon(Icons.Filled.CameraAlt, contentDescription = null) },
+                        label = { Text("Texto Curto") }
+                    )
+                    NavigationBarItem(
+                        selected = currentScreen == Screen.Documento,
+                        onClick = { currentScreen = Screen.Documento },
+                        icon = { Icon(Icons.Filled.Description, contentDescription = null) },
+                        label = { Text("Documento") }
+                    )
+                    NavigationBarItem(
+                        selected = currentScreen == Screen.Configuracoes,
+                        onClick = { currentScreen = Screen.Configuracoes },
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                        label = { Text("Configurações") }
+                    )
+                }
             }
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            when (currentScreen) {
-                Screen.LEITURA -> CameraScreen(voice = selectedVoice, rate = rateString)
-                Screen.DOCUMENTO -> DocumentScreen(voice = selectedVoice, rate = rateString)
-                Screen.CONFIGURACOES -> SettingsScreen(
+            when (val screen = currentScreen) {
+                Screen.Leitura -> CameraScreen(voice = selectedVoice, rate = rateString)
+                Screen.Documento -> DocumentScreen(
+                    voice = selectedVoice,
+                    rate = rateString,
+                    onTextRecognized = { text -> currentScreen = Screen.Reader(text) }
+                )
+                is Screen.Reader -> ReaderScreen(
+                    text = screen.text,
+                    initialVoice = selectedVoice,
+                    initialRatePercent = ratePercent,
+                    onBack = { currentScreen = Screen.Documento }
+                )
+                Screen.Configuracoes -> SettingsScreen(
                     selectedVoice = selectedVoice,
                     speechRatePercent = ratePercent,
                     onVoiceSelected = {

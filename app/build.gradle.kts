@@ -13,8 +13,8 @@ android {
         applicationId = "com.parlero.leitor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
 
         ndk {
             // Python 3.13 (Chaquopy) só suporta ABIs de 64 bits. arm64-v8a cobre praticamente
